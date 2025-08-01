@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>MediaPipe Model Tester</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+            height: 100vh;
+        }
+        #container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            border: 2px solid #333;
+        }
+        #webcam {
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1); /* Flip for mirror effect */
+        }
+        #outputCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1); /* Flip to match video */
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+        label {
+            font-size: 1.1em;
+        }
+        select {
+            padding: 8px;
+            font-size: 1em;
+            background-color: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 5px;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+</head>
+
+<body>
+    <h1>MediaPipe Model Tester 🚀</h1>
+    <div id="container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="outputCanvas" width="640" height="480"></canvas>
+    </div>
+    <div class="controls">
+        <label for="model-select">Choose a model:</label>
+        <select name="models" id="model-select">
+            <option value="holistic">Full Body (Holistic)</option>
+            <option value="hands">Hands Only</option>
+            <option value="pose">Body Pose</option>
+        </select>
+    </div>
+
+<script>
+    // Get HTML elements
+    const videoElement = document.getElementById('webcam');
+    const canvasElement = document.getElementById('outputCanvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const modelSelect = document.getElementById('model-select');
+
+    let activeModel = null;
+    let camera = null;
+
+    // --- Drawing Function ---
+    function onResults(results) {
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        const model = modelSelect.value;
+        if (model === 'holistic' && results.poseLandmarks) {
+            drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 4 });
+            drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FF0000', lineWidth: 2 });
+            if (results.leftHandLandmarks) {
+                drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS, { color: '#CC0000', lineWidth: 5 });
+                drawLandmarks(canvasCtx, results.leftHandLandmarks, { color: '#00FF00', lineWidth: 2 });
+            }
+            if (results.rightHandLandmarks) {
+                drawConnectors(canvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS, { color: '#00CC00', lineWidth: 5 });
+                drawLandmarks(canvasCtx, results.rightHandLandmarks, { color: '#FF0000', lineWidth: 2 });
+            }
+        } else if (model === 'hands' && results.multiHandLandmarks) {
+            for (const landmarks of results.multiHandLandmarks) {
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 5 });
+                drawLandmarks(canvasCtx, landmarks, { color: '#FF0000', lineWidth: 2 });
+            }
+        } else if (model === 'pose' && results.poseLandmarks) {
+            drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#00FF00', lineWidth: 4 });
+            drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FF0000', radius: 6 });
+        }
+        canvasCtx.restore();
+    }
+
+    // --- Model Initialization and Switching ---
+    async function setupModel(modelName) {
+        // Close the previous model if it exists
+        if (activeModel && activeModel.close) {
+            activeModel.close();
+        }
+
+        const commonOptions = {
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        };
+
+        switch (modelName) {
+            case 'holistic':
+                activeModel = new Holistic({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`});
+                activeModel.setOptions({
+                    ...commonOptions,
+                    enableFaceLandmarks: false, // Set to true if you want face mesh
+                    refineFaceLandmarks: false
+                });
+                break;
+            case 'hands':
+                activeModel = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+                activeModel.setOptions({ ...commonOptions, maxNumHands: 2 });
+                break;
+            case 'pose':
+                activeModel = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+                activeModel.setOptions(commonOptions);
+                break;
+        }
+        activeModel.onResults(onResults);
+    }
+
+    // --- Main Execution ---
+    modelSelect.addEventListener('change', (e) => {
+        setupModel(e.target.value);
+    });
+
+    // Initialize the first model
+    setupModel(modelSelect.value).then(() => {
+        camera = new Camera(videoElement, {
+            onFrame: async () => {
+                if (activeModel) {
+                    await activeModel.send({ image: videoElement });
+                }
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+    });
+
+</script>
+</body>
+</html>
